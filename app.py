@@ -20,12 +20,13 @@ import io
 import os
 import logging
 
+
 import numpy as np
 from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from disease_info import CLASS_NAMES, get_disease_info
+from disease_info import CLASS_NAMES, get_disease_info, get_ai_enriched_info
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -106,7 +107,8 @@ def preprocess_image(file_bytes: bytes) -> np.ndarray:
     it was trained using OpenCV-loaded images) instead of RGB (PIL's default)."""
     image = Image.open(io.BytesIO(file_bytes)).convert("RGB")
     image = image.resize((IMG_SIZE, IMG_SIZE))
-    arr = np.asarray(image, dtype=np.float32) / 255.0
+    arr = np.asarray(image, dtype=np.float32)
+    arr = (arr / 127.5) - 1.0  # MobileNetV2 standard preprocessing: -1 to 1
     if CHANNEL_ORDER == "BGR":
         arr = arr[:, :, ::-1]  # reverse channel order RGB -> BGR
     arr = np.expand_dims(arr, axis=0)  # add batch dimension
@@ -196,12 +198,16 @@ def predict():
         class_name = CLASS_NAMES[top_index]
         info = get_disease_info(class_name)
 
+# Try to enrich the treatment text with AI-generated detail;
+# falls back to the static text automatically if it fails
+        enriched_treatment = get_ai_enriched_info(info["display_name"], info["treatment"])
+
         response = {
             "class_name": class_name,
             "display_name": info["display_name"],
             "healthy": info["healthy"],
             "confidence": round(confidence, 4),
-            "treatment": info["treatment"],
+            "treatment": enriched_treatment,
         }
         return jsonify(response)
 

@@ -260,3 +260,54 @@ def get_disease_info(class_name: str) -> dict:
             "treatment": "No specific treatment info available for this class.",
         },
     )
+import os
+import logging
+from groq import Groq
+
+logger = logging.getLogger(__name__)
+
+_groq_client = None
+
+
+def _get_client():
+    """Lazily create the Groq client, only once."""
+    global _groq_client
+    if _groq_client is None:
+        api_key = os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            return None
+        _groq_client = Groq(api_key=api_key)
+    return _groq_client
+
+
+def get_ai_enriched_info(display_name: str, static_treatment: str) -> str:
+    """
+    Ask Groq (Llama model) for a more detailed, farmer-friendly cause and
+    treatment explanation. Falls back to the existing static treatment text
+    if the API key is missing, the call fails, or there's no internet.
+    """
+    client = _get_client()
+    if client is None:
+        return static_treatment  # no API key configured, use static fallback
+
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=300,
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"A farmer's crop has been diagnosed with '{display_name}'. "
+                        f"In simple, practical language a farmer can understand, "
+                        f"explain: (1) what causes this disease, and (2) what they "
+                        f"should do to treat it. Keep it under 100 words, no headers, "
+                        f"just clear plain text."
+                    ),
+                }
+            ],
+        )
+        return completion.choices[0].message.content.strip()
+    except Exception as e:
+        logger.warning("AI enrichment failed, using static fallback: %s", e)
+        return static_treatment
